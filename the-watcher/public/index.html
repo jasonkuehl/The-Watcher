@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Watcher &mdash; Site Status Monitor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --bg2:       #1a1d27;
+      --bg3:       #22263a;
+      --border:    #2e3249;
+      --text:      #e2e8f0;
+      --muted:     #8892a4;
+      --green:     #22c55e;
+      --green-dim: #14532d;
+      --red:       #ef4444;
+      --red-dim:   #7f1d1d;
+      --yellow:    #eab308;
+      --yellow-dim:#713f12;
+      --gray:      #64748b;
+      --gray-dim:  #1e293b;
+      --accent:    #6366f1;
+    }
+
+    html { font-size: 14px; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ── Incident banner ── */
+    #incident-banner {
+      display: none;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      background: #1a0a00;
+      border-bottom: 2px solid var(--red);
+    }
+    #incident-banner.has-degraded {
+      background: #1a1200;
+      border-bottom-color: var(--yellow);
+    }
+    .banner-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 24px;
+      gap: 12px;
+    }
+    .banner-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: #fb923c;
+      white-space: nowrap;
+    }
+    #incident-banner.has-degraded .banner-title { color: var(--yellow); }
+    .banner-dismiss-all {
+      background: transparent;
+      border: 1px solid #fb923c55;
+      border-radius: 6px;
+      color: #fb923c;
+      font-size: 0.72rem;
+      padding: 3px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s;
+    }
+    .banner-dismiss-all:hover { background: #fb923c22; }
+    #incident-banner.has-degraded .banner-dismiss-all { border-color: var(--yellow-dim); color: var(--yellow); }
+    #incident-banner.has-degraded .banner-dismiss-all:hover { background: var(--yellow-dim); }
+    .banner-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0 24px 10px;
+    }
+    .banner-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: #2a1200;
+      border: 1px solid #fb923c33;
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 0.78rem;
+    }
+    #incident-banner.has-degraded .banner-item {
+      background: var(--yellow-dim);
+      border-color: var(--yellow);
+      border-opacity: .2;
+    }
+    .banner-item-name { font-weight: 600; color: var(--text); }
+    .banner-item-status {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .bis-critical     { background: var(--red-dim);    color: var(--red); }
+    .bis-major_outage { background: #431407; color: #fb923c; }
+    .bis-degraded     { background: var(--yellow-dim); color: var(--yellow); }
+    .bis-down         { background: var(--red-dim);    color: var(--red); }
+    .bis-unknown      { background: var(--gray-dim);   color: var(--gray); }
+    .banner-item-desc { color: var(--muted); font-size: 0.72rem; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .banner-item-link { color: var(--accent); text-decoration: none; font-size: 0.72rem; }
+    .banner-item-link:hover { text-decoration: underline; }
+    .banner-dismiss-one {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .banner-dismiss-one:hover { color: var(--text); }
+
+    /* ── Header ── */
+    header {
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    header h1 span { color: var(--accent); }
+    #refresh-info {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    #refresh-info b { color: var(--text); }
+
+    /* ── Summary bar ── */
+    #summary {
+      display: flex;
+      gap: 12px;
+      padding: 16px 24px;
+      flex-wrap: wrap;
+    }
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 20px;
+      min-width: 120px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .stat-card .label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+    .stat-card .value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+    .stat-card.up    .value { color: var(--green); }
+    .stat-card.down  .value { color: var(--red); }
+    .stat-card.unknown .value { color: var(--gray); }
+    .stat-card.total  .value { color: var(--accent); }
+
+    /* ── Controls ── */
+    #controls {
+      display: flex;
+      gap: 10px;
+      padding: 0 24px 16px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    #search {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 8px 14px;
+      font-size: 0.9rem;
+      flex: 1;
+      min-width: 200px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    #search:focus { border-color: var(--accent); }
+    #search::placeholder { color: var(--muted); }
+
+    .filter-group { display: flex; gap: 6px; }
+    .filter-btn {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--muted);
+      padding: 8px 14px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .filter-btn:hover { border-color: var(--accent); color: var(--text); }
+    .filter-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    #sort-select {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 8px 14px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      outline: none;
+    }
+
+    /* ── Grid ── */
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+      padding: 0 24px 32px;
+    }
+
+    /* ── Site card ── */
+    .site-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color .15s, transform .1s;
+      position: relative;
+      overflow: hidden;
+    }
+    .site-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .site-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      border-radius: 12px 12px 0 0;
+    }
+    .site-card.up    ::before,
+    .site-card.up    { --card-accent: var(--green); }
+    .site-card.down  { --card-accent: var(--red); }
+    .site-card.unknown { --card-accent: var(--gray); }
+    .site-card.slow  { --card-accent: var(--yellow); }
+    .site-card::before { background: var(--card-accent, var(--gray)); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .site-favicon {
+      width: 20px;
+      height: 20px;
+      border-radius: 4px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    .site-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .site-url {
+      font-size: 0.7rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      padding: 3px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .badge-up      { background: var(--green-dim); color: var(--green); }
+    .badge-down    { background: var(--red-dim);   color: var(--red); }
+    .badge-unknown { background: var(--gray-dim);  color: var(--gray); }
+    .badge-slow    { background: var(--yellow-dim);color: var(--yellow); }
+    /* port check statuses */
+    .badge-open          { background: var(--green-dim);  color: var(--green); }
+    .badge-closed        { background: var(--red-dim);    color: var(--red); }
+    .badge-filtered      { background: var(--yellow-dim); color: var(--yellow); }
+    .badge-open-filtered { background: var(--yellow-dim); color: var(--yellow); }
+    .badge-error         { background: var(--red-dim);    color: var(--red); }
+
+    /* ── Type tag badges ── */
+    .type-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+    .tag {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      padding: 1px 5px;
+      border-radius: 3px;
+      border: 1px solid;
+      white-space: nowrap;
+    }
+    .tag-http        { color: var(--muted);   border-color: var(--border); }
+    .tag-api         { color: #a78bfa;        border-color: #a78bfa55; background: #a78bfa0d; }
+    .tag-status-page { color: #22d3ee;        border-color: #22d3ee55; background: #22d3ee0d; }
+    .tag-ping        { color: #fb923c;        border-color: #fb923c55; background: #fb923c0d; }
+    .tag-tcp         { color: var(--green);   border-color: var(--green-dim); background: #22c55e0d; }
+    .tag-udp         { color: var(--yellow);  border-color: var(--yellow-dim); background: #eab3080d; }
+
+    /* ── Port checks section ── */
+    #port-section { margin-top: 8px; }
+    #port-section h2 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      padding: 0 24px;
+      margin-bottom: 12px;
+    }
+    #port-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 12px;
+      padding: 0 24px 32px;
+    }
+
+    /* ── Metrics row ── */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .metric {
+      background: var(--bg3);
+      border-radius: 8px;
+      padding: 8px 6px;
+      text-align: center;
+    }
+    .metric .m-label {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      margin-bottom: 3px;
+    }
+    .metric .m-value {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .metric.good  .m-value { color: var(--green); }
+    .metric.ok    .m-value { color: var(--yellow); }
+    .metric.bad   .m-value { color: var(--red); }
+    .metric.na    .m-value { color: var(--gray); }
+
+    /* ── Footer row of card ── */
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+
+    .sp-btn {
+      font-size: 0.72rem;
+      color: var(--accent);
+      text-decoration: none;
+      padding: 2px 8px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .sp-btn:hover { background: var(--accent); color: #fff; }
+
+    /* ── Reported status row ── */
+    .reported-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+    }
+    .reported-label { color: var(--muted); white-space: nowrap; }
+    .reported-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      padding: 2px 7px;
+      border-radius: 999px;
+      white-space: nowrap;
+      text-decoration: none;
+      cursor: default;
+    }
+    a.reported-badge {
+      cursor: pointer;
+      transition: filter .15s;
+    }
+    a.reported-badge:hover { filter: brightness(1.25); }
+    .rb-operational  { background: var(--green-dim);  color: var(--green); }
+    .rb-degraded     { background: var(--yellow-dim); color: var(--yellow); }
+    .rb-major_outage { background: #431407; color: #fb923c; }
+    .rb-critical     { background: var(--red-dim);    color: var(--red); }
+    .rb-unknown      { background: var(--gray-dim);   color: var(--gray); }
+    .rb-unmonitored  { background: var(--gray-dim);   color: var(--muted); font-style: italic; }
+
+    /* ── Loading / empty states ── */
+    #loading {
+      grid-column: 1/-1;
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+      font-size: 1rem;
+    }
+    .spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    footer {
+      text-align: center;
+      padding: 20px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      #grid, #port-grid { grid-template-columns: 1fr; padding: 0 12px 24px; }
+      #summary, #controls { padding-left: 12px; padding-right: 12px; }
+      #port-section h2 { padding: 0 12px; }
+      header { padding: 12px 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="incident-banner" role="alert" aria-live="polite">
+  <div class="banner-header">
+    <span class="banner-title" id="banner-title">&#9888; Service Issues Detected</span>
+    <button class="banner-dismiss-all" id="banner-dismiss-all">Dismiss All</button>
+  </div>
+  <div class="banner-list" id="banner-list"></div>
+</div>
+
+<header>
+  <div>
+    <h1>The <span>Watcher</span></h1>
+  </div>
+  <div id="refresh-info">
+    Next check in <b id="countdown">--</b>s &nbsp;&bull;&nbsp; Last updated: <b id="last-updated">--</b>
+  </div>
+</header>
+
+<div id="summary">
+  <div class="stat-card total">
+    <span class="label">Total Sites</span>
+    <span class="value" id="stat-total">--</span>
+  </div>
+  <div class="stat-card up">
+    <span class="label">Online</span>
+    <span class="value" id="stat-up">--</span>
+  </div>
+  <div class="stat-card down">
+    <span class="label">Down</span>
+    <span class="value" id="stat-down">--</span>
+  </div>
+  <div class="stat-card unknown">
+    <span class="label">Unknown</span>
+    <span class="value" id="stat-unknown">--</span>
+  </div>
+</div>
+
+<div id="controls">
+  <input type="search" id="search" placeholder="Search sites..." autocomplete="off" />
+  <div class="filter-group">
+    <button class="filter-btn active" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="up">Up</button>
+    <button class="filter-btn" data-filter="down">Down</button>
+    <button class="filter-btn" data-filter="slow">Slow (&gt;800ms)</button>
+    <button class="filter-btn" data-filter="has-status-page">Has Status API</button>
+    <button class="filter-btn" data-filter="tag:http">HTTP</button>
+    <button class="filter-btn" data-filter="tag:api">API</button>
+    <button class="filter-btn" data-filter="tag:status-page">Status Pages</button>
+    <button class="filter-btn" data-filter="tag:ports">TCP / UDP</button>
+  </div>
+  <select id="sort-select">
+    <option value="name">Sort: Name</option>
+    <option value="responseTime">Sort: Response Time</option>
+    <option value="ping">Sort: Ping</option>
+  </select>
+</div>
+
+<main id="grid">
+  <div id="loading"><div class="spinner"></div>Running initial checks&hellip; this may take up to 30 seconds.</div>
+</main>
+
+<div id="port-section" style="display:none">
+  <h2>TCP / UDP Port Checks</h2>
+  <div id="port-grid" class="grid"></div>
+</div>
+
+<footer>
+  Monitoring <span id="footer-count">111</span> sites &bull; Checks run every 30 seconds &bull; Ping + TCP latency + HTTP response + port checks
+</footer>
+
+<script>
+  const REFRESH_MS    = 5000;   // poll API every 5s
+  const CHECK_CYCLE   = 30;     // server check cycle in seconds
+
+  let allSites        = [];
+  let allPorts        = [];
+  let currentFilter   = 'all';
+  let countdown       = CHECK_CYCLE;
+  let lastData        = null;
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  const fmt = (ms) => ms == null ? '—' : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms/1000).toFixed(1)}s`;
+
+  const metricClass = (ms, threshGood = 300, threshOk = 800) => {
+    if (ms == null) return 'na';
+    if (ms <= threshGood) return 'good';
+    if (ms <= threshOk)   return 'ok';
+    return 'bad';
+  };
+
+  const timeAgo = (iso) => {
+    if (!iso) return 'never';
+    const diff = Math.round((Date.now() - new Date(iso)) / 1000);
+    if (diff < 10)  return 'just now';
+    if (diff < 60)  return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    return `${Math.floor(diff/3600)}h ago`;
+  };
+
+  // ── Build a card ───────────────────────────────────────────────────────────
+
+  function buildCard(site) {
+    const isSlow = site.status === 'up' && site.responseTime != null && site.responseTime > 800;
+    const displayStatus = isSlow ? 'slow' : site.status;
+
+    const badgeClass = {
+      up:      'badge-up',
+      down:    'badge-down',
+      slow:    'badge-slow',
+      unknown: 'badge-unknown',
+    }[displayStatus] || 'badge-unknown';
+
+    const badgeText = {
+      up:      'ONLINE',
+      down:    'DOWN',
+      slow:    'SLOW',
+      unknown: 'UNKNOWN',
+    }[displayStatus] || 'UNKNOWN';
+
+    // Reported status row (only for sites with a status API)
+    const SP_LABELS = {
+      operational:  'Operational',
+      degraded:     'Degraded',
+      major_outage: 'Major Outage',
+      critical:     'Critical',
+      unknown:      'Unknown',
+      unmonitored:  "Can't monitor status page",
+    };
+    let reportedHtml = '';
+    if (site.hasStatusApi || site.reportedStatus === 'unmonitored') {
+      const rs    = site.reportedStatus ?? 'unknown';
+      const label = SP_LABELS[rs] ?? rs;
+      const desc  = site.reportedDescription ? escHtml(site.reportedDescription) : '';
+      const spUrl = safeUrl(site.statusPageUrl);
+      const badgeTag  = spUrl
+        ? `<a href="${spUrl}" target="_blank" rel="noopener" class="reported-badge rb-${safeStatus(rs)}" title="${desc || label}">${label} ↗</a>`
+        : `<span class="reported-badge rb-${safeStatus(rs)}" title="${desc || label}">${label}</span>`;
+      reportedHtml = `
+  <div class="reported-row">
+    <span class="reported-label">Self-reported:</span>
+    ${badgeTag}
+    ${desc ? `<span style="color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="${desc}">${desc}</span>` : ''}
+  </div>`;
+    } else {
+      reportedHtml = '';
+    }
+
+    const tagsHtml = (site.tags || ['http'])
+      .map(t => `<span class="tag tag-${t.replace(/[^a-z0-9]/g, '-')}">${escHtml(t)}</span>`)
+      .join('');
+
+    return `
+<div class="site-card ${displayStatus}" data-host="${site.host}" data-status="${site.status}" data-rt="${site.responseTime ?? 99999}" data-ping="${site.ping ?? 99999}" data-uptime="${site.uptime ?? -1}" data-name="${site.name.toLowerCase()}">
+  <div class="card-header">
+    <img class="site-favicon" src="https://www.google.com/s2/favicons?domain=${site.host}&sz=32" alt="" onerror="this.style.display='none'" loading="lazy" />
+    <div style="min-width:0;flex:1">
+      <div class="site-name">${escHtml(site.name)}</div>
+      <div class="site-url">${escHtml(site.host)}</div>
+      <div class="type-tags">${tagsHtml}</div>
+    </div>
+    <span class="status-badge ${badgeClass}">${badgeText}${site.statusCode ? ` ${site.statusCode}` : ''}</span>
+  </div>
+
+  <div class="metrics">
+    <div class="metric ${metricClass(site.ping, 50, 150)}">
+      <div class="m-label">Ping</div>
+      <div class="m-value">${fmt(site.ping)}</div>
+    </div>
+    <div class="metric ${metricClass(site.latency, 100, 400)}">
+      <div class="m-label">Latency</div>
+      <div class="m-value">${fmt(site.latency)}</div>
+    </div>
+    <div class="metric ${metricClass(site.responseTime, 600, 1500)}">
+      <div class="m-label">Response</div>
+      <div class="m-value">${fmt(site.responseTime)}</div>
+    </div>
+  </div>
+
+  ${reportedHtml}
+
+  <div class="card-footer">
+    ${(() => { const u = safeUrl(site.statusPageUrl); return u ? `<a href="${u}" target="_blank" rel="noopener" class="sp-btn">Status Page ↗</a>` : `<span>${timeAgo(site.lastChecked)}</span>`; })()}
+  </div>
+</div>`;
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Only allow http(s) URLs in href attributes — rejects javascript: and other schemes
+  function safeUrl(url) {
+    if (!url) return null;
+    try {
+      const u = new URL(url);
+      return (u.protocol === 'https:' || u.protocol === 'http:') ? escHtml(u.href) : null;
+    } catch { return null; }
+  }
+
+  // Whitelist reportedStatus values before they are interpolated into CSS class names
+  const VALID_REPORTED_STATUS = new Set(['operational','degraded','major_outage','critical','unknown','unmonitored']);
+  function safeStatus(rs) {
+    return VALID_REPORTED_STATUS.has(rs) ? rs : 'unknown';
+  }
+
+  // ── Port check card ────────────────────────────────────────────────────────
+
+  function buildPortCard(entry) {
+    const s = entry.status;
+    const badgeClass = {
+      open:           'badge-open',
+      closed:         'badge-closed',
+      filtered:       'badge-filtered',
+      'open|filtered':'badge-open-filtered',
+      error:          'badge-error',
+      unknown:        'badge-unknown',
+    }[s] ?? 'badge-unknown';
+
+    const badgeText = {
+      open:           'OPEN',
+      closed:         'CLOSED',
+      filtered:       'FILTERED',
+      'open|filtered':'OPEN|FILTERED',
+      error:          'ERROR',
+      unknown:        'UNKNOWN',
+    }[s] ?? 'UNKNOWN';
+
+    const latency   = entry.latency != null ? `${entry.latency}ms` : '—';
+    const proto     = entry.protocol.toUpperCase();
+
+    const isIp = /^[\d.]+$/.test(entry.host);
+    const faviconHtml = isIp ? '' : `<img class="site-favicon" src="https://www.google.com/s2/favicons?domain=${entry.host}&sz=32" alt="" onerror="this.style.display='none'" loading="lazy" />`;
+
+    return `
+<div class="site-card port-card ${s === 'open' ? 'up' : s === 'closed' || s === 'error' ? 'down' : 'unknown'}">
+  <div class="card-header">
+    ${faviconHtml}
+    <div style="min-width:0;flex:1">
+      <div class="site-name">${escHtml(entry.name)}</div>
+      <div class="site-url">${escHtml(entry.host)}:${entry.port}</div>
+      <div class="type-tags"><span class="tag tag-${entry.protocol}">${proto}</span></div>
+    </div>
+    <span class="status-badge ${badgeClass}">${badgeText}</span>
+  </div>
+
+  <div class="metrics">
+    <div class="metric na">
+      <div class="m-label">Port</div>
+      <div class="m-value" style="color:var(--text)">${entry.port}</div>
+    </div>
+    <div class="metric na">
+      <div class="m-label">Protocol</div>
+      <div class="m-value" style="color:var(--text)">${proto}</div>
+    </div>
+    <div class="metric ${entry.latency != null ? metricClass(entry.latency, 50, 200) : 'na'}">
+      <div class="m-label">Latency</div>
+      <div class="m-value">${latency}</div>
+    </div>
+  </div>
+
+  <div class="card-footer">
+    <span>${timeAgo(entry.lastChecked)}</span>
+  </div>
+</div>`;
+  }
+
+  function render() {
+    if (!allSites.length) return;
+
+    const query       = document.getElementById('search').value.toLowerCase().trim();
+    const sortBy      = document.getElementById('sort-select').value;
+    const portSection = document.getElementById('port-section');
+    const portGrid    = document.getElementById('port-grid');
+    const mainGrid    = document.getElementById('grid');
+
+    // Port-only filter: show port section, hide main grid
+    const isPortFilter = currentFilter === 'tag:ports' ||
+                         currentFilter === 'tag:tcp'   ||
+                         currentFilter === 'tag:udp';
+
+    if (isPortFilter) {
+      mainGrid.style.display    = 'none';
+      portSection.style.display = 'block';
+      const fp = allPorts.filter(p => {
+        if (query && !p.name.toLowerCase().includes(query) && !p.host.includes(query)) return false;
+        if (currentFilter === 'tag:tcp') return p.protocol === 'tcp';
+        if (currentFilter === 'tag:udp') return p.protocol === 'udp';
+        return true;
+      });
+      portGrid.innerHTML = fp.length
+        ? fp.map(buildPortCard).join('')
+        : `<div style="color:var(--muted)">No port checks configured.</div>`;
+      return;
+    }
+
+    // Normal site filter
+    mainGrid.style.display    = '';
+    portSection.style.display = allPorts.length ? 'block' : 'none';
+
+    let filtered = allSites.filter(s => {
+      if (query && !s.name.toLowerCase().includes(query) && !s.host.toLowerCase().includes(query)) return false;
+      if (currentFilter === 'up')   return s.status === 'up' && !(s.responseTime > 800);
+      if (currentFilter === 'down') return s.status === 'down';
+      if (currentFilter === 'slow') return s.status === 'up' && s.responseTime != null && s.responseTime > 800;
+      if (currentFilter === 'has-status-page') return !!s.statusPageUrl;
+      if (currentFilter.startsWith('tag:')) {
+        const tag = currentFilter.slice(4);
+        return (s.tags || []).includes(tag);
+      }
+      return true;
+    });
+
+    const statusPriority = (s) => {
+      const st = s.status === 'up' && s.responseTime > 800 ? 'slow' : s.status;
+      return { down: 0, slow: 1, unknown: 2, up: 3 }[st] ?? 4;
+    };
+
+    filtered.sort((a, b) => {
+      const spDiff = statusPriority(a) - statusPriority(b);
+      if (spDiff !== 0) return spDiff;
+      if (sortBy === 'name')         return a.name.localeCompare(b.name);
+      if (sortBy === 'responseTime') return (a.responseTime ?? 99999) - (b.responseTime ?? 99999);
+      if (sortBy === 'ping')         return (a.ping ?? 99999) - (b.ping ?? 99999);
+      return a.name.localeCompare(b.name);
+    });
+
+    if (filtered.length === 0) {
+      mainGrid.innerHTML = `<div id="loading" style="color:var(--muted)">No sites match your filter.</div>`;
+    } else {
+      mainGrid.innerHTML = filtered.map(buildCard).join('');
+    }
+
+    // Always render port checks below main grid (respects search query)
+    if (allPorts.length) {
+      const fp = allPorts.filter(p =>
+        !query || p.name.toLowerCase().includes(query) || p.host.includes(query)
+      );
+      portGrid.innerHTML = fp.map(buildPortCard).join('');
+    }
+  }
+
+  // ── Fetch data ─────────────────────────────────────────────────────────────
+
+  async function fetchData() {
+    try {
+      const [statusRes, portsRes] = await Promise.all([
+        fetch('/api/status'),
+        fetch('/api/ports'),
+      ]);
+      if (!statusRes.ok) return;
+      allSites = await statusRes.json();
+      if (portsRes.ok) allPorts = await portsRes.json();
+      lastData = Date.now();
+
+      // Update summary
+      const up      = allSites.filter(s => s.status === 'up').length;
+      const down    = allSites.filter(s => s.status === 'down').length;
+      const unknown = allSites.filter(s => s.status === 'unknown').length;
+      document.getElementById('stat-total').textContent   = allSites.length;
+      document.getElementById('stat-up').textContent      = up;
+      document.getElementById('stat-down').textContent    = down;
+      document.getElementById('stat-unknown').textContent = unknown;
+      document.getElementById('footer-count').textContent = allSites.length;
+      document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+
+      render();
+    } catch (e) {
+      console.error('Failed to fetch status:', e);
+    }
+  }
+
+  // ── Countdown timer ────────────────────────────────────────────────────────
+
+  setInterval(() => {
+    countdown = Math.max(0, countdown - 1);
+    document.getElementById('countdown').textContent = countdown;
+    if (countdown === 0) countdown = CHECK_CYCLE;
+  }, 1000);
+
+  // ── Events ─────────────────────────────────────────────────────────────────
+
+  document.getElementById('search').addEventListener('input', render);
+  document.getElementById('sort-select').addEventListener('change', render);
+
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentFilter = btn.dataset.filter;
+      render();
+    });
+  });
+
+  // ── Boot ───────────────────────────────────────────────────────────────────
+
+  fetchData();
+  setInterval(fetchData, REFRESH_MS);
+
+  // ── Incident banner ────────────────────────────────────────────────────────
+
+  const DISMISSED_KEY = 'thewatcher_dismissed_v1';
+
+  function getDismissed() {
+    try { return new Set(JSON.parse(sessionStorage.getItem(DISMISSED_KEY) || '[]')); }
+    catch { return new Set(); }
+  }
+  function saveDismissed(set) {
+    sessionStorage.setItem(DISMISSED_KEY, JSON.stringify([...set]));
+  }
+  function dismissKey(key) {
+    const d = getDismissed();
+    d.add(key);
+    saveDismissed(d);
+  }
+
+  const SP_STATUS_LABELS = {
+    critical:     'Critical',
+    major_outage: 'Major Outage',
+    degraded:     'Degraded',
+    unknown:      'Unknown',
+  };
+
+  async function fetchIncidents() {
+    try {
+      const res = await fetch('/api/incidents');
+      if (!res.ok) return;
+      const incidents = await res.json();
+      renderBanner(incidents);
+    } catch {}
+  }
+
+  function renderBanner(incidents) {
+    const dismissed   = getDismissed();
+    const visible     = incidents.filter(i => !dismissed.has(i.dismissKey));
+    const banner      = document.getElementById('incident-banner');
+    const list        = document.getElementById('banner-list');
+    const title       = document.getElementById('banner-title');
+
+    if (visible.length === 0) {
+      banner.style.display = 'none';
+      return;
+    }
+
+    // Colour theme: orange if any critical/major/down, yellow if degraded-only
+    const hasHigh = visible.some(i =>
+      i.reportedStatus === 'critical' || i.reportedStatus === 'major_outage' || i.httpStatus === 'down'
+    );
+    banner.className = hasHigh ? '' : 'has-degraded';
+    banner.style.display = 'block';
+    title.textContent = `\u26A0 ${visible.length} Service Issue${visible.length > 1 ? 's' : ''} Detected`;
+
+    list.innerHTML = visible.map(inc => {
+      const rs     = inc.reportedStatus;
+      const isDown = inc.httpStatus === 'down';
+      const badgeCls = rs ? `bis-${safeStatus(rs)}` : (isDown ? 'bis-down' : 'bis-unknown');
+      const badgeTxt = rs ? (SP_STATUS_LABELS[rs] ?? rs) : (isDown ? 'DOWN' : 'Unknown');
+      const desc   = inc.description ? escHtml(inc.description.slice(0, 80)) + (inc.description.length > 80 ? '…' : '') : '';
+      const link   = (() => { const u = safeUrl(inc.statusPageUrl); return u ? `<a href="${u}" target="_blank" rel="noopener" class="banner-item-link">Status Page ↗</a>` : ''; })();
+      return `<div class="banner-item">
+  <span class="banner-item-name">${escHtml(inc.name)}</span>
+  <span class="banner-item-status ${badgeCls}">${badgeTxt}</span>
+  ${desc ? `<span class="banner-item-desc" title="${escHtml(inc.description)}">${desc}</span>` : ''}
+  ${link}
+  <button class="banner-dismiss-one" data-key="${escHtml(inc.dismissKey)}" title="Dismiss">&times;</button>
+</div>`;
+    }).join('');
+
+    // Per-item dismiss
+    list.querySelectorAll('.banner-dismiss-one').forEach(btn => {
+      btn.addEventListener('click', () => {
+        dismissKey(btn.dataset.key);
+        fetchIncidents();
+      });
+    });
+  }
+
+  document.getElementById('banner-dismiss-all').addEventListener('click', () => {
+    fetch('/api/incidents')
+      .then(r => r.json())
+      .then(incidents => {
+        const d = getDismissed();
+        incidents.forEach(i => d.add(i.dismissKey));
+        saveDismissed(d);
+        document.getElementById('incident-banner').style.display = 'none';
+      })
+      .catch(() => {});
+  });
+
+  fetchIncidents();
+  setInterval(fetchIncidents, REFRESH_MS);
+</script>
+</body>
+</html>

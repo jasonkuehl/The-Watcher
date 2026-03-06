@@ -100,12 +100,4 @@ jobs:
       with:
         category: "/language:${{matrix.language}}"
 
-
-    - name: npm Package Existence Checker
-      # You may pin to the exact commit or the version.
-      # uses: directus/npm-package-existence-checker@9bb0c1e36d2f33912ee958ac8ced0a33ce896255
-      uses: directus/npm-package-existence-checker@v1.0.0
-      with:
-        # Root directory to check
-        directory: # optional, default is.
           

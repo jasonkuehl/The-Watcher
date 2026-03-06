@@ -19,6 +19,7 @@ RUN npm ci --omit=dev
 # Copy application source
 COPY server.js ./
 COPY public/ ./public/
+COPY config/ ./config/
 
 # Switch to non-root user
 USER watcher

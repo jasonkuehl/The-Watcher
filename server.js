@@ -719,7 +719,7 @@ app.use((req, res, next) => {
   // Inline scripts + styles exist in index.html; allow Google for favicons
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' https://www.google.com data:; " +
+    "default-src 'self'; img-src 'self' https://www.google.com https://*.gstatic.com data:; " +
     "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
     "connect-src 'self'; frame-ancestors 'none'",
   );

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>The Watcher &mdash; Site Status Monitor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👁️</text></svg>" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -226,6 +227,7 @@
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       gap: 12px;
       padding: 0 24px 32px;
+      contain: layout;
     }
 
     /* ── Site card ── */
@@ -242,6 +244,7 @@
       overflow: hidden;
     }
     .site-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+    .site-card { contain: layout style; }
     .site-card::before {
       content: '';
       position: absolute;
@@ -263,11 +266,29 @@
       gap: 8px;
     }
     .site-favicon {
-      width: 20px;
-      height: 20px;
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      min-height: 24px;
       border-radius: 4px;
-      object-fit: contain;
       flex-shrink: 0;
+      background: var(--bg3);
+      object-fit: contain;
+    }
+    .site-favicon-letter {
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      min-height: 24px;
+      border-radius: 4px;
+      flex-shrink: 0;
+      background: var(--bg3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
     }
     .site-name {
       font-weight: 600;
@@ -275,6 +296,7 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      min-height: 1.2em;
     }
     .site-url {
       font-size: 0.7rem;
@@ -363,6 +385,8 @@
     .metric .m-value {
       font-size: 0.9rem;
       font-weight: 600;
+      min-width: 50px;
+      text-align: center;
     }
     .metric.good  .m-value { color: var(--green); }
     .metric.ok    .m-value { color: var(--yellow); }
@@ -536,6 +560,9 @@
   let currentFilter   = 'all';
   let countdown       = CHECK_CYCLE;
   let lastData        = null;
+  let lastSitesHash   = '';
+  let lastPortsHash   = '';
+  let lastIncidentsHash = '';
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -609,10 +636,18 @@
       .map(t => `<span class="tag tag-${t.replace(/[^a-z0-9]/g, '-')}">${escHtml(t)}</span>`)
       .join('');
 
+    // Check if host is IP address or non-web service (no favicon available)
+    const isNonWebHost = /^[\d.]+$/.test(site.host) || /^(smtp|imap|pop3|ntp|time|health|pkg|packages)\./i.test(site.host);
+    const siteLetter = site.name.charAt(0).toUpperCase();
+    const siteFaviconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${site.host}`;
+    const siteFaviconHtml = isNonWebHost
+      ? `<span class="site-favicon-letter">${siteLetter}</span>`
+      : `<img class="site-favicon" src="${siteFaviconUrl}" alt="" onerror="this.outerHTML='<span class=site-favicon-letter>${siteLetter}</span>'" />`;
+
     return `
 <div class="site-card ${displayStatus}" data-host="${site.host}" data-status="${site.status}" data-rt="${site.responseTime ?? 99999}" data-ping="${site.ping ?? 99999}" data-uptime="${site.uptime ?? -1}" data-name="${site.name.toLowerCase()}">
   <div class="card-header">
-    <img class="site-favicon" src="https://www.google.com/s2/favicons?domain=${site.host}&sz=32" alt="" onerror="this.style.display='none'" loading="lazy" />
+    ${siteFaviconHtml}
     <div style="min-width:0;flex:1">
       <div class="site-name">${escHtml(site.name)}</div>
       <div class="site-url">${escHtml(site.host)}</div>
@@ -688,13 +723,17 @@
     const latency   = entry.latency != null ? `${entry.latency}ms` : '—';
     const proto     = entry.protocol.toUpperCase();
 
-    const isIp = /^[\d.]+$/.test(entry.host);
-    const faviconHtml = isIp ? '' : `<img class="site-favicon" src="https://www.google.com/s2/favicons?domain=${entry.host}&sz=32" alt="" onerror="this.style.display='none'" loading="lazy" />`;
+    const isNonWebPort = /^[\d.]+$/.test(entry.host) || /^(smtp|imap|pop3|ntp|time|health|pkg|packages)\./i.test(entry.host);
+    const portLetter = entry.name.charAt(0).toUpperCase();
+    const portFaviconUrl = `https://www.google.com/s2/favicons?sz=64&domain=${entry.host}`;
+    const portFaviconHtml = isNonWebPort
+      ? `<span class="site-favicon-letter">${portLetter}</span>`
+      : `<img class="site-favicon" src="${portFaviconUrl}" alt="" onerror="this.outerHTML='<span class=site-favicon-letter>${portLetter}</span>'" />`;
 
     return `
 <div class="site-card port-card ${s === 'open' ? 'up' : s === 'closed' || s === 'error' ? 'down' : 'unknown'}">
   <div class="card-header">
-    ${faviconHtml}
+    ${portFaviconHtml}
     <div style="min-width:0;flex:1">
       <div class="site-name">${escHtml(entry.name)}</div>
       <div class="site-url">${escHtml(entry.host)}:${entry.port}</div>
@@ -808,9 +847,18 @@
         fetch('/api/ports'),
       ]);
       if (!statusRes.ok) return;
-      allSites = await statusRes.json();
-      if (portsRes.ok) allPorts = await portsRes.json();
+      const newSites = await statusRes.json();
+      const newPorts = portsRes.ok ? await portsRes.json() : [];
       lastData = Date.now();
+
+      // Create hashes to detect actual data changes
+      const newSitesHash = JSON.stringify(newSites);
+      const newPortsHash = JSON.stringify(newPorts);
+      const dataChanged = newSitesHash !== lastSitesHash || newPortsHash !== lastPortsHash;
+
+      // Always update the data arrays
+      allSites = newSites;
+      allPorts = newPorts;
 
       // Update summary
       const up      = allSites.filter(s => s.status === 'up').length;
@@ -823,7 +871,12 @@
       document.getElementById('footer-count').textContent = allSites.length;
       document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
 
-      render();
+      // Only re-render if data actually changed
+      if (dataChanged) {
+        lastSitesHash = newSitesHash;
+        lastPortsHash = newPortsHash;
+        render();
+      }
     } catch (e) {
       console.error('Failed to fetch status:', e);
     }
@@ -885,7 +938,11 @@
       const res = await fetch('/api/incidents');
       if (!res.ok) return;
       const incidents = await res.json();
-      renderBanner(incidents);
+      const newHash = JSON.stringify(incidents);
+      if (newHash !== lastIncidentsHash) {
+        lastIncidentsHash = newHash;
+        renderBanner(incidents);
+      }
     } catch {}
   }
 
@@ -929,6 +986,7 @@
     list.querySelectorAll('.banner-dismiss-one').forEach(btn => {
       btn.addEventListener('click', () => {
         dismissKey(btn.dataset.key);
+        lastIncidentsHash = ''; // Force re-render after dismiss
         fetchIncidents();
       });
     });
@@ -941,6 +999,7 @@
         const d = getDismissed();
         incidents.forEach(i => d.add(i.dismissKey));
         saveDismissed(d);
+        lastIncidentsHash = ''; // Force re-render after dismiss
         document.getElementById('incident-banner').style.display = 'none';
       })
       .catch(() => {});

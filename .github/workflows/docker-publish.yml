@@ -9,7 +9,7 @@ on:
       - main
 
 env:
-  REGISTRY: ghcr.io
+  REGISTRY: git.yolo.fail
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
@@ -24,13 +24,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Registry paths must be lowercase; the repo name is not
+      - name: Set image name
+        run: echo "IMAGE=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Set up QEMU (multi-platform emulation)
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
+      - name: Log in to Gitea Container Registry
         if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
@@ -55,5 +59,5 @@ jobs:
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}:buildcache,mode=max', env.IMAGE) || '' }}

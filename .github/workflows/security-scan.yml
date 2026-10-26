@@ -1,0 +1,59 @@
+name: Security Scan
+
+# Replaces CodeQL, which only reports to GitHub's Security tab.
+# Findings are printed in the job log; HIGH/CRITICAL issues fail the run.
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '42 16 * * 2'
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: Semgrep (JavaScript/TypeScript + workflows)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config p/javascript \
+            --config p/typescript \
+            --config p/github-actions \
+            --severity ERROR \
+            --error \
+            --metrics=off
+
+  trivy:
+    name: Trivy (dependencies + misconfiguration)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,misconfig,secret
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'

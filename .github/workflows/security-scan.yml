@@ -47,13 +47,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # aquasecurity/trivy-action fetches its installer from GitHub with the job token,
+      # which is a Gitea token here, so install the release binary directly
+      - name: Install Trivy
+        env:
+          TRIVY_VERSION: 0.76.1
+        run: |
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          file="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSLO "$base/$file"
+          curl -fsSL "$base/trivy_${TRIVY_VERSION}_checksums.txt" | grep " ${file}$" | sha256sum -c -
+          tar -xzf "$file" trivy && install -m 755 trivy /usr/local/bin/trivy && rm -f trivy "$file"
+          trivy --version
+
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig,secret
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          format: table
-          exit-code: '1'
+        run: trivy fs --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .

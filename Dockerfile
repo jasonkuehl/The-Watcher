@@ -14,7 +14,9 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install production dependencies only
-RUN npm ci --omit=dev
+# then drop npm itself: it isn't used at runtime, and its bundled packages carry known vulnerabilities
+RUN npm ci --omit=dev && npm cache clean --force && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 # Copy application source
 COPY server.js ./
